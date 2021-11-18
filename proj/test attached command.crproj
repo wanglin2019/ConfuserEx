@@ -1,0 +1,35 @@
+<project outputDir="F:\repos\ConfuserEx\Tests\WpfRenaming\bin\Debug\net472\Confused" baseDir="F:\repos\ConfuserEx\Tests\WpfRenaming\bin\Debug\net472" xmlns="http://confuser.codeplex.com">
+
+
+  
+  <module path="WpfRenaming.dll" >
+    <rule pattern="true">
+	<protection id="rename" >
+		<argument name="mode" value="sequential" />
+		<argument name="password" value="This password is secret" />
+		<argument name="renameArgs" value="true" />
+		<argument name="renEnum" value="true" />
+		<argument name="flatten" value="true" />
+		<argument name="forceRen" value="false" />
+		<argument name="renPublic" value="true" />
+		<argument name="renPdb" value="true" />
+		<argument name="renXaml" value="true" />
+	</protection>
+    </rule>
+</module>
+<module path="WpfRenaminglib.dll" >
+    <rule pattern="true">
+	<protection id="rename" >
+		<argument name="mode" value="sequential" />
+		<argument name="password" value="This password is secret" />
+		<argument name="renameArgs" value="true" />
+		<argument name="renEnum" value="true" />
+		<argument name="flatten" value="true" />
+		<argument name="forceRen" value="false" />
+		<argument name="renPublic" value="true" />
+		<argument name="renPdb" value="true" />
+		<argument name="renXaml" value="true" />
+	</protection>
+    </rule>
+</module>
+</project>

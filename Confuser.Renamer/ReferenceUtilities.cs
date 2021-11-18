@@ -10,6 +10,8 @@ namespace Confuser.Renamer {
 			builder.Append("Original Name").Append(": ");
 			builder.Append(nameService.GetDisplayName(def));
 			builder.Append("; ");
+			builder.Append("Current Full Name").Append(": ").Append(def.FullName);
+			builder.Append("; ");
 			return builder.AppendHashedIdentifier("Name", def.FullName);
 		}
 
