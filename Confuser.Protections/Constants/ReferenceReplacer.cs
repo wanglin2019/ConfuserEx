@@ -12,6 +12,7 @@ namespace Confuser.Protections.Constants {
 	internal class ReferenceReplacer {
 		public static void ReplaceReference(CEContext ctx, ProtectionParameters parameters) {
 			foreach (var entry in ctx.ReferenceRepl) {
+				EnsureNoInlining(entry.Key);
 				if (parameters.GetParameter<bool>(ctx.Context, entry.Key, "cfg"))
 					ReplaceCFG(entry.Key, entry.Value, ctx);
 				else
@@ -25,7 +26,14 @@ namespace Confuser.Protections.Constants {
 				instr.Item1.OpCode = OpCodes.Ldc_I4;
 				instr.Item1.Operand = (int)instr.Item2;
 				method.Body.Instructions.Insert(i + 1, Instruction.Create(OpCodes.Call, instr.Item3));
+				Instruction instr1 = method.Body.Instructions[i + 1];
+				method.Body.Instructions.Insert(i + 1, Instruction.Create(OpCodes.Br_S, instr1));
 			}
+		}
+
+		static void EnsureNoInlining(MethodDef method) {
+			method.ImplAttributes &= ~MethodImplAttributes.AggressiveInlining;
+			method.ImplAttributes |= MethodImplAttributes.NoInlining;
 		}
 
 		struct CFGContext {
@@ -263,7 +271,7 @@ namespace Confuser.Protections.Constants {
 				foreach (var stateId in stateIds) {
 					// There must be at least one update&get
 					if (currentState.Get(stateId) == targetState.Value.Get(stateId) &&
-					    i != stateIds.Length - 1) {
+						i != stateIds.Length - 1) {
 						i++;
 						continue;
 					}

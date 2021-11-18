@@ -60,6 +60,84 @@ namespace Confuser.Core {
 		}
 
 		/// <summary>
+		///     Determines whether the specified method is visible outside the containing assembly.
+		/// </summary>
+		/// <param name="methodDef">The method that is checked.</param>
+		/// <returns><see langword="true"/> in case the method is visible outside of the assembly.</returns>
+		/// <exception cref="ArgumentNullException"><paramref name="methodDef"/> is <see langword="null"/>.</exception>
+		/// <remarks>
+		///     The method is considered visible in case it is public or visible to sub-types (protected) and the
+		///     declaring type is also visible outside of the assembly.
+		/// </remarks>
+		public static bool IsVisibleOutside(this MethodDef methodDef) {
+			if (methodDef == null) throw new ArgumentNullException(nameof(methodDef));
+
+			switch (methodDef.Access) {
+				case MethodAttributes.Family:
+				case MethodAttributes.FamORAssem:
+				case MethodAttributes.Public:
+					return methodDef.DeclaringType.IsVisibleOutside();
+			}
+
+			return false;
+		}
+
+		/// <summary>
+		///     Determines whether the specified field is visible outside the containing assembly.
+		/// </summary>
+		/// <param name="fieldDef">The field that is checked.</param>
+		/// <returns><see langword="true"/> in case the field is visible outside of the assembly.</returns>
+		/// <exception cref="ArgumentNullException"><paramref name="fieldDef"/> is <see langword="null"/>.</exception>
+		/// <remarks>
+		///     The field is considered visible in case it is public or visible to sub-types (protected) and the
+		///     declaring type is also visible outside of the assembly.
+		/// </remarks>
+		public static bool IsVisibleOutside(this FieldDef fieldDef) {
+			if (fieldDef == null) throw new ArgumentNullException(nameof(fieldDef));
+
+			switch (fieldDef.Access) {
+				case FieldAttributes.Family:
+				case FieldAttributes.FamORAssem:
+				case FieldAttributes.Public:
+					return fieldDef.DeclaringType.IsVisibleOutside();
+			}
+
+			return false;
+		}
+
+		/// <summary>
+		///     Determines whether the specified event is visible outside the containing assembly.
+		/// </summary>
+		/// <param name="eventDef">The event that is checked.</param>
+		/// <returns><see langword="true"/> in case the event is visible outside of the assembly.</returns>
+		/// <exception cref="ArgumentNullException"><paramref name="eventDef"/> is <see langword="null"/>.</exception>
+		/// <remarks>
+		///     The event is considered visible in case any of the methods related to it is visible outside.
+		/// </remarks>
+		public static bool IsVisibleOutside(this EventDef eventDef) {
+			if (eventDef == null) throw new ArgumentNullException(nameof(eventDef));
+
+			return eventDef.AllMethods().Any(IsVisibleOutside);
+		}
+
+		/// <summary>
+		///     Determines whether the specified property is visible outside the containing assembly.
+		/// </summary>
+		/// <param name="propertyDef">The event that is checked.</param>
+		/// <returns><see langword="true"/> in case the property is visible outside of the assembly.</returns>
+		/// <exception cref="ArgumentNullException">
+		///     <paramref name="propertyDef"/> is <see langword="null"/>.
+		/// </exception>
+		/// <remarks>
+		///     The property is considered visible in case any of the getter or setter methods is visible outside.
+		/// </remarks>
+		public static bool IsVisibleOutside(this PropertyDef propertyDef) {
+			if (propertyDef == null) throw new ArgumentNullException(nameof(propertyDef));
+
+			return propertyDef.GetMethods.Any(IsVisibleOutside) || propertyDef.SetMethods.Any(IsVisibleOutside);
+		}
+
+		/// <summary>
 		///     Determines whether the specified type is visible outside the containing assembly.
 		/// </summary>
 		/// <param name="typeDef">The type.</param>
@@ -98,8 +176,8 @@ namespace Confuser.Core {
 		/// <returns><c>true</c> if specified type is COM import; otherwise, <c>false</c>.</returns>
 		public static bool IsComImport(this TypeDef type) {
 			return type.IsImport ||
-			       type.HasAttribute("System.Runtime.InteropServices.ComImportAttribute") ||
-			       type.HasAttribute("System.Runtime.InteropServices.TypeLibTypeAttribute");
+				   type.HasAttribute("System.Runtime.InteropServices.ComImportAttribute") ||
+				   type.HasAttribute("System.Runtime.InteropServices.TypeLibTypeAttribute");
 		}
 
 		/// <summary>
@@ -265,18 +343,38 @@ namespace Confuser.Core {
 		}
 
 		/// <summary>
+		///     Determines whether the specified property is abstract.
+		/// </summary>
+		/// <param name="property">The property.</param>
+		/// <returns><see langword="true" /> if the specified property is abstract; otherwise, <see langword="false" /></returns>
+		public static bool IsAbstract(this PropertyDef property) =>
+			property.AllMethods().Any(method => method.IsAbstract);
+
+		/// <summary>
 		///     Determines whether the specified property is public.
 		/// </summary>
 		/// <param name="property">The property.</param>
 		/// <returns><c>true</c> if the specified property is public; otherwise, <c>false</c>.</returns>
 		public static bool IsPublic(this PropertyDef property) {
-			if (property.GetMethod != null && property.GetMethod.IsPublic)
-				return true;
+			return property.AllMethods().Any(method => method.IsPublic);
+		}
 
-			if (property.SetMethod != null && property.SetMethod.IsPublic)
-				return true;
+		/// <summary>
+		///     Determines whether the specified property is family or assembly.
+		/// </summary>
+		/// <param name="property">The property.</param>
+		/// <returns><c>true</c> if the specified property is family or assembly; otherwise, <c>false</c>.</returns>
+		public static bool IsFamilyOrAssembly(this PropertyDef property) {
+			return property.AllMethods().Any(method => method.IsFamilyOrAssembly);
+		}
 
-			return property.OtherMethods.Any(method => method.IsPublic);
+		/// <summary>
+		///     Determines whether the specified property is family.
+		/// </summary>
+		/// <param name="property">The property.</param>
+		/// <returns><c>true</c> if the specified property is family; otherwise, <c>false</c>.</returns>
+		public static bool IsFamily(this PropertyDef property) {
+			return property.AllMethods().Any(method => method.IsFamily);
 		}
 
 		/// <summary>
@@ -285,14 +383,16 @@ namespace Confuser.Core {
 		/// <param name="property">The property.</param>
 		/// <returns><c>true</c> if the specified property is static; otherwise, <c>false</c>.</returns>
 		public static bool IsStatic(this PropertyDef property) {
-			if (property.GetMethod != null && property.GetMethod.IsStatic)
-				return true;
-
-			if (property.SetMethod != null && property.SetMethod.IsStatic)
-				return true;
-
-			return property.OtherMethods.Any(method => method.IsStatic);
+			return property.AllMethods().Any(method => method.IsStatic);
 		}
+
+		/// <summary>
+		///     Determines whether the specified event is abstract.
+		/// </summary>
+		/// <param name="evt">The event.</param>
+		/// <returns><see langword="true" /> if the specified event is abstract; otherwise, <see langword="false" /></returns>
+		public static bool IsAbstract(this EventDef evt) =>
+			evt.AllMethods().Any(method => method.IsAbstract);
 
 		/// <summary>
 		///     Determines whether the specified event is public.
@@ -300,16 +400,25 @@ namespace Confuser.Core {
 		/// <param name="evt">The event.</param>
 		/// <returns><c>true</c> if the specified event is public; otherwise, <c>false</c>.</returns>
 		public static bool IsPublic(this EventDef evt) {
-			if (evt.AddMethod != null && evt.AddMethod.IsPublic)
-				return true;
+			return evt.AllMethods().Any(method => method.IsPublic);
+		}
 
-			if (evt.RemoveMethod != null && evt.RemoveMethod.IsPublic)
-				return true;
+		/// <summary>
+		///     Determines whether the specified event is family or assembly.
+		/// </summary>
+		/// <param name="evt">The event.</param>
+		/// <returns><c>true</c> if the specified property is family or assembly; otherwise, <c>false</c>.</returns>
+		public static bool IsFamilyOrAssembly(this EventDef evt) {
+			return evt.AllMethods().Any(method => method.IsFamilyOrAssembly);
+		}
 
-			if (evt.InvokeMethod != null && evt.InvokeMethod.IsPublic)
-				return true;
-
-			return evt.OtherMethods.Any(method => method.IsPublic);
+		/// <summary>
+		///     Determines whether the specified event is family.
+		/// </summary>
+		/// <param name="evt">The event.</param>
+		/// <returns><c>true</c> if the specified property is family; otherwise, <c>false</c>.</returns>
+		public static bool IsFamily(this EventDef evt) {
+			return evt.AllMethods().Any(method => method.IsFamily);
 		}
 
 		/// <summary>
@@ -318,16 +427,75 @@ namespace Confuser.Core {
 		/// <param name="evt">The event.</param>
 		/// <returns><c>true</c> if the specified event is static; otherwise, <c>false</c>.</returns>
 		public static bool IsStatic(this EventDef evt) {
-			if (evt.AddMethod != null && evt.AddMethod.IsStatic)
-				return true;
+			return evt.AllMethods().Any(method => method.IsStatic);
+		}
 
-			if (evt.RemoveMethod != null && evt.RemoveMethod.IsStatic)
-				return true;
+		public static bool IsInterfaceImplementation(this MethodDef method) {
+			if (method == null) throw new ArgumentNullException(nameof(method));
 
-			if (evt.InvokeMethod != null && evt.InvokeMethod.IsStatic)
-				return true;
+			return IsImplicitImplementedInterfaceMember(method) || IsExplicitlyImplementedInterfaceMember(method);
+		}
 
-			return evt.OtherMethods.Any(method => method.IsStatic);
+		/// <summary>
+		///     Determines whether the specified method is an implicitly implemented interface member.
+		/// </summary>
+		/// <param name="method">The method.</param>
+		/// <returns>
+		///     <see langword="true" /> if the specified method is an implicitly implemented interface member;
+		///     otherwise, <see langword="false" />.
+		/// </returns>
+		/// <exception cref="ArgumentNullException"><paramref name="method"/> is <see langword="null" />.</exception>
+		/// <exception cref="TypeResolveException">Failed to resolve required interface types.</exception>
+		public static bool IsImplicitImplementedInterfaceMember(this MethodDef method) {
+			if (method == null) throw new ArgumentNullException(nameof(method));
+
+			if (method.IsPublic && method.IsNewSlot) {
+				foreach (var iFace in method.DeclaringType.Interfaces) {
+					var iFaceDef = iFace.Interface.ResolveTypeDefThrow();
+					if (iFaceDef.FindMethod(method.Name, (MethodSig)method.Signature) != null)
+						return true;
+				}
+			}
+			return false;
+		}
+
+		/// <summary>
+		///     Determines whether the specified method is an explicitly implemented interface member.
+		/// </summary>
+		/// <param name="method">The method.</param>
+		/// <returns><c>true</c> if the specified method is an explicitly implemented interface member; otherwise, <c>false</c>.</returns>
+		public static bool IsExplicitlyImplementedInterfaceMember(this MethodDef method) {
+			return method.IsFinal && method.IsPrivate;
+		}
+
+		/// <summary>
+		///     Determines whether the specified property is an explicitly implemented interface member.
+		/// </summary>
+		/// <param name="property">The method.</param>
+		/// <returns><c>true</c> if the specified property is an explicitly implemented interface member; otherwise, <c>false</c>.</returns>
+		public static bool IsExplicitlyImplementedInterfaceMember(this PropertyDef property) {
+			return property.AllMethods().Any(IsExplicitlyImplementedInterfaceMember);
+		}
+
+		/// <summary>
+		///     Determines whether the specified event is an explicitly implemented interface member.
+		/// </summary>
+		/// <param name="evt">The event.</param>
+		/// <returns><c>true</c> if the specified eve is an explicitly implemented interface member; otherwise, <c>false</c>.</returns>
+		public static bool IsExplicitlyImplementedInterfaceMember(this EventDef evt) {
+			return evt.AllMethods().Any(IsExplicitlyImplementedInterfaceMember);
+		}
+
+		private static IEnumerable<MethodDef> AllMethods(this EventDef evt) {
+			return new[] { evt.AddMethod, evt.RemoveMethod, evt.InvokeMethod }
+				.Concat(evt.OtherMethods)
+				.Where(m => m != null);
+		}
+
+		private static IEnumerable<MethodDef> AllMethods(this PropertyDef property) {
+			return new[] { property.GetMethod, property.SetMethod }
+				.Concat(property.OtherMethods)
+				.Where(m => m != null);
 		}
 
 		/// <summary>
@@ -346,6 +514,8 @@ namespace Confuser.Core {
 					eh.HandlerStart = newInstr;
 				if (eh.HandlerEnd == target)
 					eh.HandlerEnd = newInstr;
+				if (eh.FilterStart == target)
+					eh.FilterStart = newInstr;
 			}
 			foreach (Instruction instr in body.Instructions) {
 				if (instr.Operand == target)
@@ -374,85 +544,109 @@ namespace Confuser.Core {
 			}
 			return false;
 		}
-	}
 
+		public static bool IsEntryPoint(this MethodDef methodDef) {
+			if (methodDef == null) throw new ArgumentNullException(nameof(methodDef));
 
-	/// <summary>
-	///     <see cref="Stream" /> wrapper of <see cref="IImageStream" />.
-	/// </summary>
-	public class ImageStream : Stream {
+			return methodDef == methodDef.Module.EntryPoint;
+		}
+
+		public static bool IsEntryPoint(this TypeDef typeDef) {
+			if (typeDef == null) throw new ArgumentNullException(nameof(typeDef));
+
+			return typeDef == typeDef.Module.EntryPoint?.DeclaringType;
+		}
+		
 		/// <summary>
-		///     Initializes a new instance of the <see cref="ImageStream" /> class.
+		///		Merges a specified call instruction into the body.
 		/// </summary>
-		/// <param name="baseStream">The base stream.</param>
-		public ImageStream(IImageStream baseStream) {
-			BaseStream = baseStream;
-		}
+		/// <param name="targetBody">The target body</param>
+		/// <param name="callInstruction">The instruction to merge in</param>
+		public static void MergeCall(this CilBody targetBody, Instruction callInstruction) {
+			if (!(callInstruction.Operand is MethodDef methodToMerge))
+				throw new ArgumentException("Call instruction has invalid operand");
+			if (!methodToMerge.HasBody)
+				throw new Exception("Method to merge has no body!");
 
-		/// <summary>
-		///     Gets the base stream of this instance.
-		/// </summary>
-		/// <value>The base stream.</value>
-		public IImageStream BaseStream { get; private set; }
+			var localParams = methodToMerge.Parameters.ToDictionary(param => param.Index, param => new Local(param.Type));
+			var localMap = methodToMerge.Body.Variables.ToDictionary(local => local, local => new Local(local.Type));
+			foreach (var local in localParams)
+				targetBody.Variables.Add(local.Value);
+			foreach (var local in localMap)
+				targetBody.Variables.Add(local.Value);
 
-		/// <inheritdoc />
-		public override bool CanRead {
-			get { return true; }
-		}
+			// Nop the call
+			int index = targetBody.Instructions.IndexOf(callInstruction) + 1;
+			callInstruction.OpCode = OpCodes.Nop;
+			callInstruction.Operand = null;
+			var afterIndex = targetBody.Instructions[index];
 
-		/// <inheritdoc />
-		public override bool CanSeek {
-			get { return true; }
-		}
-
-		/// <inheritdoc />
-		public override bool CanWrite {
-			get { return false; }
-		}
-
-		/// <inheritdoc />
-		public override long Length {
-			get { return BaseStream.Length; }
-		}
-
-		/// <inheritdoc />
-		public override long Position {
-			get { return BaseStream.Position; }
-			set { BaseStream.Position = value; }
-		}
-
-		/// <inheritdoc />
-		public override void Flush() { }
-
-		/// <inheritdoc />
-		public override int Read(byte[] buffer, int offset, int count) {
-			return BaseStream.Read(buffer, offset, count);
-		}
-
-		/// <inheritdoc />
-		public override long Seek(long offset, SeekOrigin origin) {
-			switch (origin) {
-				case SeekOrigin.Begin:
-					BaseStream.Position = offset;
-					break;
-				case SeekOrigin.Current:
-					BaseStream.Position += offset;
-					break;
-				case SeekOrigin.End:
-					BaseStream.Position = BaseStream.Length + offset;
-					break;
+			// Find Exception handler index
+			int exIndex = 0;
+			foreach (var ex in targetBody.ExceptionHandlers) {
+				if (targetBody.Instructions.IndexOf(ex.TryStart) < index)
+					exIndex = targetBody.ExceptionHandlers.IndexOf(ex);
 			}
-			return BaseStream.Position;
-		}
 
-		/// <inheritdoc />
-		public override void SetLength(long value) {
-			throw new NotSupportedException();
-		}
+			// setup parameter locals
+			foreach (var paramLocal in localParams.Reverse()) {
+				targetBody.Instructions.Insert(index++, new Instruction(OpCodes.Stloc, paramLocal.Value));
+			}
 
-		/// <inheritdoc />
-		public override void Write(byte[] buffer, int offset, int count) {
-			throw new NotSupportedException();
+			var instrMap = new Dictionary<Instruction, Instruction>();
+			var newInstrs = new List<Instruction>();
+
+			// Transfer instructions to list
+			foreach (var instr in methodToMerge.Body.Instructions) {
+				Instruction newInstr;
+				if (instr.OpCode == OpCodes.Ret) {
+					newInstr = new Instruction(OpCodes.Br, afterIndex);
+				}
+				else if (instr.IsLdarg()) {
+					localParams.TryGetValue(instr.GetParameterIndex(), out var lc);
+					newInstr = new Instruction(OpCodes.Ldloc, lc);
+				}
+				else if (instr.IsStarg()) {
+					localParams.TryGetValue(instr.GetParameterIndex(), out var lc);
+					newInstr = new Instruction(OpCodes.Stloc, lc);
+				}
+				else if (instr.IsLdloc()) {
+					localMap.TryGetValue(instr.GetLocal(methodToMerge.Body.Variables), out var lc);
+					newInstr = new Instruction(OpCodes.Ldloc, lc);
+				}
+				else if (instr.IsStloc()) {
+					localMap.TryGetValue(instr.GetLocal(methodToMerge.Body.Variables), out var lc);
+					newInstr = new Instruction(OpCodes.Stloc, lc);
+				}
+				else {
+					newInstr = new Instruction(instr.OpCode, instr.Operand);
+				}
+
+				newInstrs.Add(newInstr);
+				instrMap[instr] = newInstr;
+			}
+
+			// Fix branch targets & add instructions
+			foreach (var instr in newInstrs) {
+				if (instr.Operand != null && instr.Operand is Instruction instrOp && instrMap.ContainsKey(instrOp))
+					instr.Operand = instrMap[instrOp];
+				else if (instr.Operand is Instruction[] instructionArrayOp)
+					instr.Operand = instructionArrayOp.Select(target => instrMap[target]).ToArray();
+
+				targetBody.Instructions.Insert(index++, instr);
+			}
+
+			// Add Exception Handlers
+			foreach (var eh in methodToMerge.Body.ExceptionHandlers) {
+				targetBody.ExceptionHandlers.Insert(++exIndex, new ExceptionHandler(eh.HandlerType) {
+					CatchType = eh.CatchType,
+					TryStart = instrMap[eh.TryStart],
+					TryEnd = instrMap[eh.TryEnd],
+					HandlerStart = instrMap[eh.HandlerStart],
+					HandlerEnd = instrMap[eh.HandlerEnd],
+					FilterStart = eh.FilterStart == null ? null : instrMap[eh.FilterStart]
+				});
+			}
 		}
 	}
 }

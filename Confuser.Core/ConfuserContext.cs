@@ -48,7 +48,13 @@ namespace Confuser.Core {
 		///     Gets the assembly resolver.
 		/// </summary>
 		/// <value>The assembly resolver.</value>
-		public AssemblyResolver Resolver { get; internal set; }
+		public IAssemblyResolver Resolver => InternalResolver;
+
+		/// <summary>
+		///     Gets the assembly resolver.
+		/// </summary>
+		/// <value>The assembly resolver.</value>
+		internal ConfuserAssemblyResolver InternalResolver { get; set; }
 
 		/// <summary>
 		///     Gets the modules being protected.
@@ -125,12 +131,6 @@ namespace Confuser.Core {
 		public ModuleWriterOptionsBase CurrentModuleWriterOptions { get; internal set; }
 
 		/// <summary>
-		///     Gets the writer event listener of the current module.
-		/// </summary>
-		/// <value>The writer event listener.</value>
-		public ModuleWriterListener CurrentModuleWriterListener { get; internal set; }
-
-		/// <summary>
 		///     Gets output <c>byte[]</c> of the current module
 		/// </summary>
 		/// <value>The output <c>byte[]</c>.</value>
@@ -161,27 +161,36 @@ namespace Confuser.Core {
 		///     Requests the current module to be written as mix-mode module, and return the native writer options.
 		/// </summary>
 		/// <returns>The native writer options.</returns>
-		public NativeModuleWriterOptions RequestNative() {
+		public NativeModuleWriterOptions RequestNative(bool optimizeImageSize) {
 			if (CurrentModule == null)
 				return null;
 			if (CurrentModuleWriterOptions == null)
-				CurrentModuleWriterOptions = new NativeModuleWriterOptions(CurrentModule);
-
-			if (CurrentModuleWriterOptions is NativeModuleWriterOptions)
-				return (NativeModuleWriterOptions)CurrentModuleWriterOptions;
-			var newOptions = new NativeModuleWriterOptions(CurrentModule, CurrentModuleWriterOptions.Listener);
+				CurrentModuleWriterOptions = new NativeModuleWriterOptions(CurrentModule, optimizeImageSize);
+			
 			// Clone the current options to the new options
-			newOptions.AddCheckSum = CurrentModuleWriterOptions.AddCheckSum;
-			newOptions.Cor20HeaderOptions = CurrentModuleWriterOptions.Cor20HeaderOptions;
-			newOptions.Logger = CurrentModuleWriterOptions.Logger;
-			newOptions.MetaDataLogger = CurrentModuleWriterOptions.MetaDataLogger;
-			newOptions.MetaDataOptions = CurrentModuleWriterOptions.MetaDataOptions;
-			newOptions.ModuleKind = CurrentModuleWriterOptions.ModuleKind;
-			newOptions.PEHeadersOptions = CurrentModuleWriterOptions.PEHeadersOptions;
-			newOptions.ShareMethodBodies = CurrentModuleWriterOptions.ShareMethodBodies;
-			newOptions.StrongNameKey = CurrentModuleWriterOptions.StrongNameKey;
-			newOptions.StrongNamePublicKey = CurrentModuleWriterOptions.StrongNamePublicKey;
-			newOptions.Win32Resources = CurrentModuleWriterOptions.Win32Resources;
+			var newOptions = new NativeModuleWriterOptions(CurrentModule, optimizeImageSize) {
+				AddCheckSum = CurrentModuleWriterOptions.AddCheckSum,
+				AddMvidSection = CurrentModuleWriterOptions.AddMvidSection,
+				Cor20HeaderOptions = CurrentModuleWriterOptions.Cor20HeaderOptions,
+				GetPdbContentId = CurrentModuleWriterOptions.GetPdbContentId,
+				Logger = CurrentModuleWriterOptions.Logger,
+				MetadataLogger = CurrentModuleWriterOptions.MetadataLogger,
+				MetadataOptions = CurrentModuleWriterOptions.MetadataOptions,
+				ModuleKind = CurrentModuleWriterOptions.ModuleKind,
+				NoWin32Resources = CurrentModuleWriterOptions.NoWin32Resources,
+				PdbChecksumAlgorithm = CurrentModuleWriterOptions.PdbChecksumAlgorithm,
+				PdbFileName = CurrentModuleWriterOptions.PdbFileName,
+				PdbFileNameInDebugDirectory = CurrentModuleWriterOptions.PdbFileNameInDebugDirectory,
+				PdbOptions = CurrentModuleWriterOptions.PdbOptions,
+				PdbStream = CurrentModuleWriterOptions.PdbStream,
+				PEHeadersOptions = CurrentModuleWriterOptions.PEHeadersOptions,
+				ShareMethodBodies = CurrentModuleWriterOptions.ShareMethodBodies,
+				DelaySign = CurrentModuleWriterOptions.DelaySign,
+				StrongNameKey = CurrentModuleWriterOptions.StrongNameKey,
+				StrongNamePublicKey = CurrentModuleWriterOptions.StrongNamePublicKey,
+				Win32Resources = CurrentModuleWriterOptions.Win32Resources,
+				WritePdb = CurrentModuleWriterOptions.WritePdb,
+			};
 			CurrentModuleWriterOptions = newOptions;
 			return newOptions;
 		}

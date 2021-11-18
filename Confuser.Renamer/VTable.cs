@@ -30,7 +30,7 @@ namespace Confuser.Renamer {
 			if (other == null)
 				return false;
 			return new SigComparer().Equals(MethodSig, other.MethodSig) &&
-			       Name.Equals(other.Name, StringComparison.Ordinal);
+				   Name.Equals(other.Name, StringComparison.Ordinal);
 		}
 
 		public override int GetHashCode() {
@@ -53,7 +53,7 @@ namespace Confuser.Renamer {
 		}
 
 		public override string ToString() {
-			return FullNameCreator.MethodFullName("", Name, MethodSig);
+			return FullNameFactory.MethodFullName("", Name, MethodSig);
 		}
 	}
 
@@ -98,7 +98,7 @@ namespace Confuser.Renamer {
 		internal VTable(TypeSig type) {
 			Type = type;
 			Slots = new List<VTableSlot>();
-			InterfaceSlots = new Dictionary<TypeSig, IList<VTableSlot>>();
+			InterfaceSlots = new Dictionary<TypeSig, IList<VTableSlot>>(TypeEqualityComparer.Instance);
 		}
 
 		public TypeSig Type { get; private set; }
@@ -107,23 +107,11 @@ namespace Confuser.Renamer {
 		public IDictionary<TypeSig, IList<VTableSlot>> InterfaceSlots { get; private set; }
 
 		class VTableConstruction {
-			class TypeSigComparer : IEqualityComparer<TypeSig> {
-				public bool Equals(TypeSig x, TypeSig y) {
-					return new SigComparer().Equals(x, y);
-				}
-
-				public int GetHashCode(TypeSig obj) {
-					return new SigComparer().GetHashCode(obj);
-				}
-
-				public static readonly TypeSigComparer Instance = new TypeSigComparer();
-			}
-
 			// All virtual method slots, excluding interfaces
 			public List<VTableSlot> AllSlots = new List<VTableSlot>();
 			// All visible virtual method slots (i.e. excluded those being shadowed)
 			public Dictionary<VTableSignature, VTableSlot> SlotsMap = new Dictionary<VTableSignature, VTableSlot>();
-			public Dictionary<TypeSig, Dictionary<VTableSignature, VTableSlot>> InterfaceSlots = new Dictionary<TypeSig, Dictionary<VTableSignature, VTableSlot>>(TypeSigComparer.Instance);
+			public Dictionary<TypeSig, ILookup<VTableSignature, VTableSlot>> InterfaceSlots = new Dictionary<TypeSig, ILookup<VTableSignature, VTableSlot>>(TypeEqualityComparer.Instance);
 		}
 
 		public IEnumerable<VTableSlot> FindSlots(IMethod method) {
@@ -136,10 +124,10 @@ namespace Confuser.Renamer {
 			var ret = new VTable(typeDef.ToTypeSig());
 
 			var virtualMethods = typeDef.Methods
-			                            .Where(method => method.IsVirtual)
-			                            .ToDictionary(
-				                            method => VTableSignature.FromMethod(method),
-				                            method => method
+										.Where(method => method.IsVirtual)
+										.ToDictionary(
+											method => VTableSignature.FromMethod(method),
+											method => method
 				);
 
 			// See Partition II 12.2 for implementation algorithm
@@ -162,18 +150,31 @@ namespace Confuser.Renamer {
 			// Normal interface implementation
 			if (!typeDef.IsInterface) {
 				// Interface methods cannot implements base interface methods.
-				foreach (var iface in vTbl.InterfaceSlots.Values) {
-					foreach (var entry in iface.ToList()) {
-						if (!entry.Value.MethodDef.DeclaringType.IsInterface)
-							continue;
+
+				foreach (var interfaceTypeSig in vTbl.InterfaceSlots.Keys.ToList()) {
+					var slots = vTbl.InterfaceSlots[interfaceTypeSig];
+					if (slots.Select(g => g.Key)
+						.Any(sig => virtualMethods.ContainsKey(sig) || vTbl.SlotsMap.ContainsKey(sig))) {
+						// Something has a new signature. We need to rewrite the whole thing.
+						
 						// This is the step 1 of 12.2 algorithm -- find implementation for still empty slots.
 						// Note that it seems we should include newslot methods as well, despite what the standard said.
-						MethodDef impl;
-						VTableSlot implSlot;
-						if (virtualMethods.TryGetValue(entry.Key, out impl))
-							iface[entry.Key] = entry.Value.OverridedBy(impl);
-						else if (vTbl.SlotsMap.TryGetValue(entry.Key, out implSlot))
-							iface[entry.Key] = entry.Value.OverridedBy(implSlot.MethodDef);
+						slots = slots
+							.SelectMany(g => g.Select(slot => (g.Key, Slot: slot)))
+							.ToLookup(t => t.Key, t => {
+								if (!t.Slot.MethodDef.DeclaringType.IsInterface)
+									return t.Slot;
+
+								if (virtualMethods.TryGetValue(t.Key, out var impl))
+									return t.Slot.OverridedBy(impl);
+
+								if (vTbl.SlotsMap.TryGetValue(t.Key, out var implSlot))
+									return t.Slot.OverridedBy(implSlot.MethodDef);
+
+								return t.Slot;
+							});
+
+						vTbl.InterfaceSlots[interfaceTypeSig] = slots;
 					}
 				}
 			}
@@ -209,19 +210,30 @@ namespace Confuser.Renamer {
 
 						var signature = VTableSignature.FromMethod(impl.MethodDeclaration);
 						CheckKeyExist(storage, ifaceVTbl, signature, "MethodImpl Iface Sig");
-						var targetSlot = ifaceVTbl[signature];
 
-						// The Overrides of interface slots should directly points to the root interface slot
-						while (targetSlot.Overrides != null)
-							targetSlot = targetSlot.Overrides;
-						Debug.Assert(targetSlot.MethodDef.DeclaringType.IsInterface);
-						ifaceVTbl[targetSlot.Signature] = targetSlot.OverridedBy(method.Value);
+						vTbl.InterfaceSlots[iface] = ifaceVTbl
+							.SelectMany(g => g.Select(slot => (g.Key, Slot: slot)))
+							.ToLookup(t => t.Key, t => {
+								if (!t.Key.Equals(signature)) 
+									return t.Slot;
+
+								var targetSlot = t.Slot;
+								while (targetSlot.Overrides != null)
+									targetSlot = targetSlot.Overrides;
+								Debug.Assert(targetSlot.MethodDef.DeclaringType.IsInterface);
+								Debug.Assert(targetSlot.Signature.Equals(t.Slot.Signature));
+
+								return targetSlot.OverridedBy(method.Value);
+							});
 					}
 					else {
-						var targetSlot = vTbl.AllSlots.Single(slot => slot.MethodDef == targetMethod);
+						var targetSlot = vTbl.AllSlots.SingleOrDefault(slot => slot.MethodDef == targetMethod);
+						if (targetSlot == null) {
+							throw new Exception($"method [{method}] not found.");
+						}
 						CheckKeyExist(storage, vTbl.SlotsMap, targetSlot.Signature, "MethodImpl Normal Sig");
 						targetSlot = vTbl.SlotsMap[targetSlot.Signature]; // Use the most derived slot
-						// Maybe implemented by above processes --- this process should take priority
+																		  // Maybe implemented by above processes --- this process should take priority
 						while (targetSlot.MethodDef.DeclaringType == typeDef)
 							targetSlot = targetSlot.Overrides;
 						vTbl.SlotsMap[targetSlot.Signature] = targetSlot.OverridedBy(method.Value);
@@ -231,7 +243,7 @@ namespace Confuser.Renamer {
 
 			// Populate result V-table
 			ret.InterfaceSlots = vTbl.InterfaceSlots.ToDictionary(
-				kvp => kvp.Key, kvp => (IList<VTableSlot>)kvp.Value.Values.ToList());
+				kvp => kvp.Key, kvp => (IList<VTableSlot>)kvp.Value.SelectMany(g => g).ToList(), TypeEqualityComparer.Instance);
 
 			foreach (var slot in vTbl.AllSlots) {
 				ret.Slots.Add(slot);
@@ -246,7 +258,7 @@ namespace Confuser.Renamer {
 			Func<VTableSlot, VTableSlot> implLookup = slot => {
 				MethodDef impl;
 				if (virtualMethods.TryGetValue(slot.Signature, out impl) &&
-				    impl.IsNewSlot && !impl.DeclaringType.IsInterface) {
+					impl.IsNewSlot && !impl.DeclaringType.IsInterface) {
 					// Interface methods cannot implements base interface methods.
 					// The Overrides of interface slots should directly points to the root interface slot
 					var targetSlot = slot;
@@ -259,21 +271,21 @@ namespace Confuser.Renamer {
 			};
 
 			if (vTbl.InterfaceSlots.ContainsKey(iface)) {
-				vTbl.InterfaceSlots[iface] = vTbl.InterfaceSlots[iface].Values.ToDictionary(
+				vTbl.InterfaceSlots[iface] = vTbl.InterfaceSlots[iface].SelectMany(g => g).ToLookup(
 					slot => slot.Signature, implLookup);
 			}
 			else {
-				vTbl.InterfaceSlots.Add(iface, ifaceVTbl.Slots.ToDictionary(
+				vTbl.InterfaceSlots.Add(iface, ifaceVTbl.Slots.ToLookup(
 					slot => slot.Signature, implLookup));
 			}
 
 			foreach (var baseIface in ifaceVTbl.InterfaceSlots) {
 				if (vTbl.InterfaceSlots.ContainsKey(baseIface.Key)) {
-					vTbl.InterfaceSlots[baseIface.Key] = vTbl.InterfaceSlots[baseIface.Key].Values.ToDictionary(
+					vTbl.InterfaceSlots[baseIface.Key] = vTbl.InterfaceSlots[baseIface.Key].SelectMany(g => g).ToLookup(
 						slot => slot.Signature, implLookup);
 				}
 				else {
-					vTbl.InterfaceSlots.Add(baseIface.Key, baseIface.Value.ToDictionary(
+					vTbl.InterfaceSlots.Add(baseIface.Key, baseIface.Value.ToLookup(
 						slot => slot.Signature, implLookup));
 				}
 			}
@@ -286,7 +298,7 @@ namespace Confuser.Renamer {
 				// when a derived type shadow the base type using newslot.
 				// In this case, use the derived type's slot in SlotsMap.
 
-				// The derived type's slots are always at a later position 
+				// The derived type's slots are always at a later position
 				// than the base type, so it would naturally 'override'
 				// their position in SlotsMap.
 				vTbl.SlotsMap[slot.Signature] = slot;
@@ -295,7 +307,7 @@ namespace Confuser.Renamer {
 			// This is the step 1 of 12.2 algorithm -- copy the base interface implementation.
 			foreach (var iface in baseVTbl.InterfaceSlots) {
 				Debug.Assert(!vTbl.InterfaceSlots.ContainsKey(iface.Key));
-				vTbl.InterfaceSlots.Add(iface.Key, iface.Value.ToDictionary(slot => slot.Signature, slot => slot));
+				vTbl.InterfaceSlots.Add(iface.Key, iface.Value.ToLookup(slot => slot.Signature, slot => slot));
 			}
 		}
 
@@ -303,7 +315,16 @@ namespace Confuser.Renamer {
 		static void CheckKeyExist<TKey, TValue>(VTableStorage storage, IDictionary<TKey, TValue> dictionary, TKey key, string name) {
 			if (!dictionary.ContainsKey(key)) {
 				storage.GetLogger().ErrorFormat("{0} not found: {1}", name, key);
-				foreach (var k in dictionary.Keys)
+				foreach (var k in dictionary.Values)
+					storage.GetLogger().ErrorFormat("    {0}", k);
+			}
+		}
+
+		[Conditional("DEBUG")]
+		static void CheckKeyExist<TKey, TValue>(VTableStorage storage, ILookup<TKey, TValue> lookup, TKey key, string name) {
+			if (!lookup.Contains(key)) {
+				storage.GetLogger().ErrorFormat("{0} not found: {1}", name, key);
+				foreach (var k in lookup.Select(g => g.Key))
 					storage.GetLogger().ErrorFormat("    {0}", k);
 			}
 		}
@@ -376,7 +397,7 @@ namespace Confuser.Renamer {
 			}
 			foreach (var iface in vTable.InterfaceSlots) {
 				ret.InterfaceSlots.Add(GenericArgumentResolver.Resolve(iface.Key, genInst.GenericArguments),
-				                       iface.Value.Select(slot => ResolveSlot(openType, slot, genInst.GenericArguments)).ToList());
+									   iface.Value.Select(slot => ResolveSlot(openType, slot, genInst.GenericArguments)).ToList());
 			}
 			return ret;
 		}

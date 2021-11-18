@@ -1,3 +1,8 @@
+# Visual Studio Cache files (starting with VS 2015)
+.vs/
+
+# Launch Settings
+launchSettings.json
 
 #ignore thumbnails created by windows
 Thumbs.db
@@ -21,7 +26,6 @@ Thumbs.db
 *.log
 [Bb]in
 [Dd]ebug*/
-*.lib
 *.sbr
 obj/
 [Rr]elease*/
@@ -33,6 +37,5 @@ packages/
 /Confuser.Test
 *.sln.*
 gh-pages/
-GlobalAssemblyInfo.cs
-/Build/*.zip
-!Build/7z.exe
+
+.idea/

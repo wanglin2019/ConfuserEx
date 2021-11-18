@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using Confuser.Core;
@@ -24,7 +25,7 @@ namespace Confuser.Protections.Compress {
 				return;
 
 			bool isExe = context.CurrentModule.Kind == ModuleKind.Windows ||
-			             context.CurrentModule.Kind == ModuleKind.Console;
+						 context.CurrentModule.Kind == ModuleKind.Console;
 
 			if (context.Annotations.Get<CompressorContext>(context, Compressor.ContextKey) != null) {
 				if (isExe) {
@@ -52,27 +53,32 @@ namespace Confuser.Protections.Compress {
 					context.CurrentModule.Kind = ModuleKind.NetModule;
 				}
 
-				context.CurrentModuleWriterListener.OnWriterEvent += new ResourceRecorder(ctx, context.CurrentModule).OnWriterEvent;
+				context.CurrentModuleWriterOptions.WriterEvent += new ResourceRecorder(ctx).WriterEvent;
 			}
 		}
 
-		class ResourceRecorder {
-			readonly CompressorContext ctx;
-			ModuleDef targetModule;
+		private sealed class ResourceRecorder {
+			private readonly CompressorContext ctx;
 
-			public ResourceRecorder(CompressorContext ctx, ModuleDef module) {
-				this.ctx = ctx;
-				targetModule = module;
-			}
+			public ResourceRecorder(CompressorContext ctx) => this.ctx = ctx;
 
-			public void OnWriterEvent(object sender, ModuleWriterListenerEventArgs e) {
-				if (e.WriterEvent == ModuleWriterEvent.MDEndAddResources) {
-					var writer = (ModuleWriterBase)sender;
-					ctx.ManifestResources = new List<Tuple<uint, uint, string>>();
-					Dictionary<uint, byte[]> stringDict = writer.MetaData.StringsHeap.GetAllRawData().ToDictionary(pair => pair.Key, pair => pair.Value);
-					foreach (RawManifestResourceRow resource in writer.MetaData.TablesHeap.ManifestResourceTable)
-						ctx.ManifestResources.Add(Tuple.Create(resource.Offset, resource.Flags, Encoding.UTF8.GetString(stringDict[resource.Name])));
-					ctx.EntryPointToken = writer.MetaData.GetToken(ctx.EntryPoint).Raw;
+			public void WriterEvent(object sender, ModuleWriterEventArgs e) {
+				if (e.Event == ModuleWriterEvent.MDEndAddResources) {
+					var writer = e.Writer;
+					ctx.ManifestResources = new List<(uint, uint, UTF8String)>();
+
+					foreach (var resource in writer.Module.Resources) {
+						var rid = writer.Metadata.GetManifestResourceRid(resource);
+						if (rid != 0) {
+							// The resource has a RID assigned. So it is part of the written module.
+							var resourceRow = writer.Metadata.TablesHeap.ManifestResourceTable[rid];
+							Debug.Assert(resourceRow.Name == writer.Metadata.StringsHeap.Add(resource.Name),
+								"Resource with RID has different name in StringHeap?!");
+							ctx.ManifestResources.Add((resourceRow.Offset, resourceRow.Flags, resource.Name));
+						}
+					}
+
+					ctx.EntryPointToken = writer.Metadata.GetToken(ctx.EntryPoint).Raw;
 				}
 			}
 		}

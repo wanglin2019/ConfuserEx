@@ -61,12 +61,12 @@ namespace Confuser.Renamer {
 				if (map.Count == 0)
 					return;
 
-				string path = Path.GetFullPath(Path.Combine(context.OutputDirectory, "symbols.map"));
-				string dir = Path.GetDirectoryName(path);
+				string dir = context.OutputDirectory;
+				string path = Path.GetFullPath(Path.Combine(dir, CoreComponent.SymbolsFileName));
 				if (!Directory.Exists(dir))
 					Directory.CreateDirectory(dir);
 
-				using (var writer = new StreamWriter(File.OpenWrite(path))) {
+				using (var writer = new StreamWriter(File.Create(path))) {
 					foreach (var entry in map)
 						writer.WriteLine("{0}\t{1}", entry.Key, entry.Value);
 				}

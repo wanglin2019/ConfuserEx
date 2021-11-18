@@ -119,7 +119,7 @@ namespace Confuser.Core {
 						}
 					}
 					if (!string.IsNullOrEmpty(info.Settings)) {
-						if ((type == ApplyInfoType.ParentInfo && info.Condition != null && info.ApplyToMember) ||
+						if ((type == ApplyInfoType.ParentInfo && info.ApplyToMember) ||
 							type == ApplyInfoType.CurrentInfoOnly ||
 							(type == ApplyInfoType.CurrentInfoInherits && info.Condition == null && info.ApplyToMember)) {
 							parser.ParseProtectionString(settings, info.Settings);
@@ -145,53 +145,56 @@ namespace Confuser.Core {
 				bool strip = true;
 				foreach (var prop in ca.Properties) {
 					switch (prop.Name) {
-						case "ApplyToMembers":
-							Debug.Assert(prop.Type.ElementType == ElementType.Boolean);
-							info.ApplyToMembers = (bool)prop.Value;
-							break;
+					case "ApplyToMembers":
+						Debug.Assert(prop.Type.ElementType == ElementType.Boolean);
+						info.ApplyToMembers = (bool)prop.Value;
+						break;
 
-						case "Exclude":
-							Debug.Assert(prop.Type.ElementType == ElementType.Boolean);
-							info.Exclude = (bool)prop.Value;
-							break;
+					case "Exclude":
+						Debug.Assert(prop.Type.ElementType == ElementType.Boolean);
+						info.Exclude = (bool)prop.Value;
+						break;
 
-						case "StripAfterObfuscation":
-							Debug.Assert(prop.Type.ElementType == ElementType.Boolean);
-							strip = (bool)prop.Value;
-							break;
+					case "StripAfterObfuscation":
+						Debug.Assert(prop.Type.ElementType == ElementType.Boolean);
+						strip = (bool)prop.Value;
+						break;
 
-						case "Feature":
-							Debug.Assert(prop.Type.ElementType == ElementType.String);
-							string feature = (UTF8String)prop.Value;
+					case "Feature":
+						Debug.Assert(prop.Type.ElementType == ElementType.String);
+						string feature = (UTF8String)prop.Value;
 
-							var match = OrderPattern.Match(feature);
-							if (match.Success) {
-								var orderStr = match.Groups[1].Value;
-								var f = match.Groups[2].Value;
-								int o;
-								if (!int.TryParse(orderStr, out o))
-									throw new NotSupportedException(string.Format("Failed to parse feature '{0}' in {1} ", feature, item));
-								order = o;
-								feature = f;
-							}
+						var match = OrderPattern.Match(feature);
+						if (match.Success) {
+							var orderStr = match.Groups[1].Value;
+							var f = match.Groups[2].Value;
+							int o;
+							if (!int.TryParse(orderStr, out o))
+								throw new NotSupportedException(string.Format("Failed to parse feature '{0}' in {1} ", feature, item));
+							order = o;
+							feature = f;
+						}
 
-							int sepIndex = feature.IndexOf(':');
-							if (sepIndex == -1) {
-								info.FeatureName = "";
-								info.FeatureValue = feature;
-							}
-							else {
-								info.FeatureName = feature.Substring(0, sepIndex);
-								info.FeatureValue = feature.Substring(sepIndex + 1);
-							}
-							break;
+						int sepIndex = feature.IndexOf(':');
+						if (sepIndex == -1) {
+							info.FeatureName = "";
+							info.FeatureValue = feature;
+						}
+						else {
+							info.FeatureName = feature.Substring(0, sepIndex);
+							info.FeatureValue = feature.Substring(sepIndex + 1);
+						}
+						break;
 
-						default:
-							throw new NotSupportedException("Unsupported property: " + prop.Name);
+					default:
+						throw new NotSupportedException("Unsupported property: " + prop.Name);
 					}
 				}
 				if (strip)
 					item.CustomAttributes.RemoveAt(i);
+
+				if (item is IMemberRef && !(item is ITypeDefOrRef))
+					info.ApplyToMembers = false;
 
 				ret.Add(Tuple.Create(order, info));
 			}
@@ -306,15 +309,24 @@ namespace Confuser.Core {
 			var modules = new List<Tuple<ProjectModule, ModuleDefMD>>();
 			foreach (ProjectModule module in proj) {
 				if (module.IsExternal) {
-					extModules.Add(module.LoadRaw(proj.BaseDirectory));
+					var rawModule = module.LoadRaw(proj.BaseDirectory);
+					extModules.Add(rawModule);
+					context.InternalResolver.AddToCache(ModuleDefMD.Load(rawModule, context.InternalResolver.DefaultModuleContext));
 					continue;
 				}
 
-				ModuleDefMD modDef = module.Resolve(proj.BaseDirectory, context.Resolver.DefaultModuleContext);
-				context.CheckCancellation();
+				try {
+					ModuleDefMD modDef =
+						module.Resolve(proj.BaseDirectory, context.InternalResolver.DefaultModuleContext);
+					context.CheckCancellation();
 
-				context.Resolver.AddToCache(modDef);
-				modules.Add(Tuple.Create(module, modDef));
+					context.InternalResolver.AddToCache(modDef);
+					modules.Add(Tuple.Create(module, modDef));
+				}
+				catch (BadImageFormatException ex) {
+					context.Logger.ErrorFormat("Failed to load \"{0}\" - Assembly does not appear to be a .NET assembly: \"{1}\".", module.Path, ex.Message);
+					throw new ConfuserException(ex);
+				}
 			}
 			foreach (var module in modules) {
 				context.Logger.InfoFormat("Loading '{0}'...", module.Item1.Path);
@@ -370,7 +382,14 @@ namespace Confuser.Core {
 		}
 
 		void MarkModule(ProjectModule projModule, ModuleDefMD module, Rules rules, bool isMain) {
-			string snKeyPath = projModule.SNKeyPath, snKeyPass = projModule.SNKeyPassword;
+			string snKeyPath = projModule.SNKeyPath;
+			string snKeyPass = projModule.SNKeyPassword;
+			string snPubKeyPath = projModule.SNPubKeyPath;
+			bool snDelaySig = projModule.SNDelaySig;
+			string snSigKeyPath = projModule.SNSigKeyPath;
+			string snSigKeyPass = projModule.SNSigKeyPassword;
+			string snPubSigKeyPath = projModule.SNPubSigKeyPath;
+
 			var stack = new ProtectionSettingsStack(context, protections);
 
 			var layer = new List<ProtectionSettingsInfo>();
@@ -417,13 +436,28 @@ namespace Confuser.Core {
 				}
 			}
 
-			if (project.Debug) {
+			if (project.Debug && module.PdbState == null) {
 				module.LoadPdb();
 			}
 
 			snKeyPath = snKeyPath == null ? null : Path.Combine(project.BaseDirectory, snKeyPath);
+			snPubKeyPath = snPubKeyPath == null ? null : Path.Combine(project.BaseDirectory, snPubKeyPath);
+			snSigKeyPath = snSigKeyPath == null ? null : Path.Combine(project.BaseDirectory, snSigKeyPath);
+			snPubSigKeyPath = snPubSigKeyPath == null ? null : Path.Combine(project.BaseDirectory, snPubSigKeyPath);
+
 			var snKey = LoadSNKey(context, snKeyPath, snKeyPass);
 			context.Annotations.Set(module, SNKey, snKey);
+
+			var snPubKey = LoadSNPubKey(context, snPubKeyPath);
+			context.Annotations.Set(module, SNPubKey, snPubKey);
+
+			context.Annotations.Set(module, SNDelaySig, snDelaySig);
+
+			var snSigKey = LoadSNKey(context, snSigKeyPath, snSigKeyPass);
+			context.Annotations.Set(module, SNSigKey, snSigKey);
+
+			var snSigPubKey = LoadSNPubKey(context, snPubSigKeyPath);
+			context.Annotations.Set(module, SNSigPubKey, snSigPubKey);
 
 			using (stack.Apply(module, layer))
 				ProcessModule(module, stack);

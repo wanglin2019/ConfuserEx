@@ -1,13 +1,14 @@
 ﻿using System;
 using System.Collections;
 using System.Diagnostics;
+using System.Linq;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Input;
 using Confuser.Core;
 using Confuser.Core.Project;
 using ConfuserEx.Views;
-using GalaSoft.MvvmLight.Command;
+using GalaSoft.MvvmLight.CommandWpf;
 
 namespace ConfuserEx.ViewModel {
 	internal class SettingsTabVM : TabViewModel {
@@ -35,7 +36,7 @@ namespace ConfuserEx.ViewModel {
 			get { return selectedList; }
 			set {
 				if (SetProperty(ref selectedList, value, "SelectedList"))
-					SelectedRuleIndex = -1;
+					SelectedRuleIndex = value.Rules.Any() ? 0 : -1;
 			}
 		}
 
@@ -46,7 +47,7 @@ namespace ConfuserEx.ViewModel {
 
 		public ICommand Add {
 			get {
-				return new RelayCommand(() => {
+				var cmd =  new RelayCommand(() => {
 					Debug.Assert(SelectedList != null);
 
 					var rule = new ProjectRuleVM(App.Project, new Rule());
@@ -54,12 +55,14 @@ namespace ConfuserEx.ViewModel {
 					SelectedList.Rules.Add(rule);
 					SelectedRuleIndex = SelectedList.Rules.Count - 1;
 				}, () => SelectedList != null);
+
+				return cmd;
 			}
 		}
 
 		public ICommand Remove {
 			get {
-				return new RelayCommand(() => {
+				var cmd = new RelayCommand(() => {
 					int selIndex = SelectedRuleIndex;
 					Debug.Assert(SelectedList != null);
 					Debug.Assert(selIndex != -1);
@@ -68,18 +71,25 @@ namespace ConfuserEx.ViewModel {
 					SelectedList.Rules.RemoveAt(selIndex);
 					SelectedRuleIndex = selIndex >= SelectedList.Rules.Count ? SelectedList.Rules.Count - 1 : selIndex;
 				}, () => SelectedRuleIndex != -1 && SelectedList != null);
+
+				return cmd;
 			}
 		}
 
 		public ICommand Edit {
 			get {
-				return new RelayCommand(() => {
-					Debug.Assert(SelectedRuleIndex != -1);
-					var dialog = new ProjectRuleView(App.Project, SelectedList.Rules[SelectedRuleIndex]);
+				var cmd = new RelayCommand<ProjectRuleVM>(rule => {
+					if (rule is null) {
+						Debug.Assert(SelectedRuleIndex != -1);
+						rule = SelectedList.Rules[SelectedRuleIndex];
+					}
+					var dialog = new ProjectRuleView(App.Project, rule);
 					dialog.Owner = Application.Current.MainWindow;
 					dialog.ShowDialog();
 					dialog.Cleanup();
-				}, () => SelectedRuleIndex != -1 && SelectedList != null);
+				}, rule => !(rule is null) || (SelectedRuleIndex != -1 && SelectedList != null));
+
+				return cmd;
 			}
 		}
 
@@ -90,6 +100,9 @@ namespace ConfuserEx.ViewModel {
 			};
 			OnPropertyChanged("ModulesView");
 			HasPacker = App.Project.Packer != null;
+
+			if (SelectedList is null)
+				SelectedList = ModulesView[0] as IRuleContainer;
 		}
 
 		protected override void OnPropertyChanged(string property) {

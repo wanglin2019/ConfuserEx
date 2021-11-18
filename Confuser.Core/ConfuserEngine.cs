@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using Confuser.Core.Project;
 using Confuser.Core.Services;
 using dnlib.DotNet;
 using dnlib.DotNet.Emit;
@@ -85,13 +86,17 @@ namespace Confuser.Core {
 
 			bool ok = false;
 			try {
-				var asmResolver = new AssemblyResolver();
-				asmResolver.EnableTypeDefCache = true;
+				// Enable watermarking by default
+				context.Project.Rules.Insert(0, new Rule {
+					new SettingItem<Protection>(WatermarkingProtection._Id)
+				});
+
+				var asmResolver = new ConfuserAssemblyResolver {EnableTypeDefCache = true};
 				asmResolver.DefaultModuleContext = new ModuleContext(asmResolver);
-				context.Resolver = asmResolver;
-				context.BaseDirectory = Path.Combine(Environment.CurrentDirectory, parameters.Project.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar);
-				context.OutputDirectory = Path.Combine(parameters.Project.BaseDirectory, parameters.Project.OutputDirectory.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar);
-				foreach (string probePath in parameters.Project.ProbePaths)
+				context.InternalResolver = asmResolver;
+				context.BaseDirectory = Path.Combine(Environment.CurrentDirectory, context.Project.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar);
+				context.OutputDirectory = Path.Combine(context.Project.BaseDirectory, context.Project.OutputDirectory.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar);
+				foreach (string probePath in context.Project.ProbePaths)
 					asmResolver.PostSearchPaths.Insert(0, Path.Combine(context.BaseDirectory, probePath));
 
 				context.CheckCancellation();
@@ -121,7 +126,7 @@ namespace Confuser.Core {
 					throw new ConfuserException(ex);
 				}
 
-				components.Insert(0, new CoreComponent(parameters, marker));
+				components.Insert(0, new CoreComponent(context, marker));
 				foreach (Protection prot in prots)
 					components.Add(prot);
 				foreach (Packer packer in packers)
@@ -132,7 +137,7 @@ namespace Confuser.Core {
 				// 4. Load modules
 				context.Logger.Info("Loading input modules...");
 				marker.Initalize(prots, packers);
-				MarkerResult markings = marker.MarkProject(parameters.Project, context);
+				MarkerResult markings = marker.MarkProject(context.Project, context);
 				context.Modules = new ModuleSorter(markings.Modules).Sort().ToList().AsReadOnly();
 				foreach (var module in context.Modules)
 					module.EnableTypeDefFindCache = false;
@@ -179,7 +184,7 @@ namespace Confuser.Core {
 				PrintEnvironmentInfo(context);
 			}
 			catch (TypeResolveException ex) {
-                context.Logger.ErrorException("Failed to resolve a type, check if all dependencies are present in the correct version.", ex);
+				context.Logger.ErrorException("Failed to resolve a type, check if all dependencies are present in the correct version.", ex);
 				PrintEnvironmentInfo(context);
 			}
 			catch (MemberRefResolveException ex) {
@@ -200,7 +205,7 @@ namespace Confuser.Core {
 			}
 			finally {
 				if (context.Resolver != null)
-					context.Resolver.Clear();
+					context.InternalResolver.Clear();
 				context.Logger.Finish(ok);
 			}
 		}
@@ -219,11 +224,9 @@ namespace Confuser.Core {
 			pipeline.ExecuteStage(PipelineStage.Inspection, Inspection, () => getAllDefs(), context);
 
 			var options = new ModuleWriterOptionsBase[context.Modules.Count];
-			var listeners = new ModuleWriterListener[context.Modules.Count];
 			for (int i = 0; i < context.Modules.Count; i++) {
 				context.CurrentModuleIndex = i;
 				context.CurrentModuleWriterOptions = null;
-				context.CurrentModuleWriterListener = null;
 
 				pipeline.ExecuteStage(PipelineStage.BeginModule, BeginModule, () => getModuleDefs(context.CurrentModule), context);
 				pipeline.ExecuteStage(PipelineStage.ProcessModule, ProcessModule, () => getModuleDefs(context.CurrentModule), context);
@@ -231,20 +234,17 @@ namespace Confuser.Core {
 				pipeline.ExecuteStage(PipelineStage.EndModule, EndModule, () => getModuleDefs(context.CurrentModule), context);
 
 				options[i] = context.CurrentModuleWriterOptions;
-				listeners[i] = context.CurrentModuleWriterListener;
 			}
 
 			for (int i = 0; i < context.Modules.Count; i++) {
 				context.CurrentModuleIndex = i;
 				context.CurrentModuleWriterOptions = options[i];
-				context.CurrentModuleWriterListener = listeners[i];
 
 				pipeline.ExecuteStage(PipelineStage.WriteModule, WriteModule, () => getModuleDefs(context.CurrentModule), context);
 
 				context.OutputModules[i] = context.CurrentModuleOutput;
 				context.OutputSymbols[i] = context.CurrentModuleSymbol;
 				context.CurrentModuleWriterOptions = null;
-				context.CurrentModuleWriterListener = null;
 				context.CurrentModuleOutput = null;
 				context.CurrentModuleSymbol = null;
 			}
@@ -262,9 +262,9 @@ namespace Confuser.Core {
 		static void Inspection(ConfuserContext context) {
 			context.Logger.Info("Resolving dependencies...");
 			foreach (var dependency in context.Modules
-			                                  .SelectMany(module => module.GetAssemblyRefs().Select(asmRef => Tuple.Create(asmRef, module)))) {
+											  .SelectMany(module => module.GetAssemblyRefs().Select(asmRef => Tuple.Create(asmRef, module)))) {
 				try {
-					AssemblyDef assembly = context.Resolver.ResolveThrow(dependency.Item1, dependency.Item2);
+					context.Resolver.ResolveThrow(dependency.Item1, dependency.Item2);
 				}
 				catch (AssemblyResolveException ex) {
 					context.Logger.ErrorException("Failed to resolve dependency of '" + dependency.Item2.Name + "'.", ex);
@@ -273,15 +273,8 @@ namespace Confuser.Core {
 			}
 
 			context.Logger.Debug("Checking Strong Name...");
-			foreach (ModuleDefMD module in context.Modules) {
-				var snKey = context.Annotations.Get<StrongNameKey>(module, Marker.SNKey);
-				if (snKey == null && module.IsStrongNameSigned)
-					context.Logger.WarnFormat("[{0}] SN Key is not provided for a signed module, the output may not be working.", module.Name);
-				else if (snKey != null && !module.IsStrongNameSigned)
-					context.Logger.WarnFormat("[{0}] SN Key is provided for an unsigned module, the output may not be working.", module.Name);
-				else if (snKey != null && module.IsStrongNameSigned &&
-				         !module.Assembly.PublicKey.Data.SequenceEqual(snKey.PublicKey))
-					context.Logger.WarnFormat("[{0}] Provided SN Key and signed module's public key do not match, the output may not be working.", module.Name);
+			foreach (var module in context.Modules) {
+				CheckStrongName(context, module);
 			}
 
 			var marker = context.Registry.GetService<IMarkerService>();
@@ -299,36 +292,32 @@ namespace Confuser.Core {
 				if (!marker.IsMarked(cctor))
 					marker.Mark(cctor, null);
 			}
+		}
 
-			context.Logger.Debug("Watermarking...");
-			foreach (ModuleDefMD module in context.Modules) {
-				TypeRef attrRef = module.CorLibTypes.GetTypeRef("System", "Attribute");
-				var attrType = new TypeDefUser("", "ConfusedByAttribute", attrRef);
-				module.Types.Add(attrType);
-				marker.Mark(attrType, null);
+		static void CheckStrongName(ConfuserContext context, ModuleDef module) {
+			var snKey = context.Annotations.Get<StrongNameKey>(module, Marker.SNKey);
+			var snPubKeyBytes = context.Annotations.Get<StrongNamePublicKey>(module, Marker.SNPubKey)?.CreatePublicKey();
+			var snDelaySign = context.Annotations.Get<bool>(module, Marker.SNDelaySig);
 
-				var ctor = new MethodDefUser(
-					".ctor",
-					MethodSig.CreateInstance(module.CorLibTypes.Void, module.CorLibTypes.String),
-					MethodImplAttributes.Managed,
-					MethodAttributes.HideBySig | MethodAttributes.Public | MethodAttributes.SpecialName | MethodAttributes.RTSpecialName);
-				ctor.Body = new CilBody();
-				ctor.Body.MaxStack = 1;
-				ctor.Body.Instructions.Add(OpCodes.Ldarg_0.ToInstruction());
-				ctor.Body.Instructions.Add(OpCodes.Call.ToInstruction(new MemberRefUser(module, ".ctor", MethodSig.CreateInstance(module.CorLibTypes.Void), attrRef)));
-				ctor.Body.Instructions.Add(OpCodes.Ret.ToInstruction());
-				attrType.Methods.Add(ctor);
-				marker.Mark(ctor, null);
+			if (snPubKeyBytes == null && snKey != null)
+				snPubKeyBytes = snKey.PublicKey;
 
-				var attr = new CustomAttribute(ctor);
-				attr.ConstructorArguments.Add(new CAArgument(module.CorLibTypes.String, Version));
+			bool moduleIsSignedOrDelayedSigned = module.IsStrongNameSigned || !module.Assembly.PublicKey.IsNullOrEmpty;
 
-				module.CustomAttributes.Add(attr);
-			}
+			bool isKeyProvided = snKey != null || (snDelaySign && snPubKeyBytes != null);
+
+			if (!isKeyProvided && moduleIsSignedOrDelayedSigned)
+				context.Logger.WarnFormat("[{0}] SN Key or SN public Key is not provided for a signed module, the output may not be working.", module.Name);
+			else if (isKeyProvided && !moduleIsSignedOrDelayedSigned)
+				context.Logger.WarnFormat("[{0}] SN Key or SN public Key is provided for an unsigned module, the output may not be working.", module.Name);
+			else if (snPubKeyBytes != null && moduleIsSignedOrDelayedSigned &&
+			         !module.Assembly.PublicKey.Data.SequenceEqual(snPubKeyBytes))
+				context.Logger.WarnFormat("[{0}] Provided SN public Key and signed module's public key do not match, the output may not be working.",
+					module.Name);
 		}
 
 		static void CopyPEHeaders(PEHeadersOptions writerOptions, ModuleDefMD module) {
-			var image = module.MetaData.PEImage;
+			var image = module.Metadata.PEImage;
 			writerOptions.MajorImageVersion = image.ImageNTHeaders.OptionalHeader.MajorImageVersion;
 			writerOptions.MajorLinkerVersion = image.ImageNTHeaders.OptionalHeader.MajorLinkerVersion;
 			writerOptions.MajorOperatingSystemVersion = image.ImageNTHeaders.OptionalHeader.MajorOperatingSystemVersion;
@@ -342,16 +331,32 @@ namespace Confuser.Core {
 		static void BeginModule(ConfuserContext context) {
 			context.Logger.InfoFormat("Processing module '{0}'...", context.CurrentModule.Name);
 
-			context.CurrentModuleWriterListener = new ModuleWriterListener();
-			context.CurrentModuleWriterListener.OnWriterEvent += (sender, e) => context.CheckCancellation();
-			context.CurrentModuleWriterOptions = new ModuleWriterOptions(context.CurrentModule, context.CurrentModuleWriterListener);
+			context.CurrentModuleWriterOptions = new ModuleWriterOptions(context.CurrentModule);
 			CopyPEHeaders(context.CurrentModuleWriterOptions.PEHeadersOptions, context.CurrentModule);
 
 			if (!context.CurrentModule.IsILOnly || context.CurrentModule.VTableFixups != null)
-				context.RequestNative();
-			
+				context.RequestNative(true);
+
 			var snKey = context.Annotations.Get<StrongNameKey>(context.CurrentModule, Marker.SNKey);
-			context.CurrentModuleWriterOptions.InitializeStrongNameSigning(context.CurrentModule, snKey);
+			var snPubKey = context.Annotations.Get<StrongNamePublicKey>(context.CurrentModule, Marker.SNPubKey);
+			var snSigKey = context.Annotations.Get<StrongNameKey>(context.CurrentModule, Marker.SNSigKey);
+			var snSigPubKey = context.Annotations.Get<StrongNamePublicKey>(context.CurrentModule, Marker.SNSigPubKey);
+
+			var snDelaySig = context.Annotations.Get<bool>(context.CurrentModule, Marker.SNDelaySig, false);
+
+			context.CurrentModuleWriterOptions.DelaySign = snDelaySig;
+
+			if (snKey != null && snPubKey != null && snSigKey != null && snSigPubKey != null)
+				context.CurrentModuleWriterOptions.InitializeEnhancedStrongNameSigning(context.CurrentModule, snSigKey, snSigPubKey, snKey, snPubKey);
+			else if (snSigPubKey != null && snSigKey != null)
+				context.CurrentModuleWriterOptions.InitializeEnhancedStrongNameSigning(context.CurrentModule, snSigKey, snSigPubKey);
+			else
+				context.CurrentModuleWriterOptions.InitializeStrongNameSigning(context.CurrentModule, snKey);
+
+			if (snDelaySig) {
+				context.CurrentModuleWriterOptions.StrongNamePublicKey = snPubKey;
+				context.CurrentModuleWriterOptions.StrongNameKey = null;
+			}
 
 			foreach (TypeDef type in context.CurrentModule.GetTypes())
 				foreach (MethodDef method in type.Methods) {
@@ -361,7 +366,8 @@ namespace Confuser.Core {
 				}
 		}
 
-		static void ProcessModule(ConfuserContext context) { }
+		static void ProcessModule(ConfuserContext context) => 
+			context.CurrentModuleWriterOptions.WriterEvent += (sender, e) => context.CheckCancellation();
 
 		static void OptimizeMethods(ConfuserContext context) {
 			foreach (TypeDef type in context.CurrentModule.GetTypes())
@@ -427,7 +433,7 @@ namespace Confuser.Core {
 		}
 
 		static void SaveModules(ConfuserContext context) {
-			context.Resolver.Clear();
+			context.InternalResolver.Clear();
 			for (int i = 0; i < context.OutputModules.Count; i++) {
 				string path = Path.GetFullPath(Path.Combine(context.OutputDirectory, context.OutputPaths[i]));
 				string dir = Path.GetDirectoryName(path);
@@ -451,11 +457,11 @@ namespace Confuser.Core {
 
 				Type mono = Type.GetType("Mono.Runtime");
 				context.Logger.InfoFormat("Running on {0}, {1}, {2} bits",
-				                          Environment.OSVersion,
-				                          mono == null ?
-					                          ".NET Framework v" + Environment.Version :
-					                          mono.GetMethod("GetDisplayName", BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, null),
-				                          IntPtr.Size * 8);
+										  Environment.OSVersion,
+										  mono == null ?
+											  ".NET Framework v" + Environment.Version :
+											  mono.GetMethod("GetDisplayName", BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, null),
+										  IntPtr.Size * 8);
 			}
 		}
 
@@ -464,7 +470,7 @@ namespace Confuser.Core {
 
 			using (RegistryKey ndpKey =
 				RegistryKey.OpenRemoteBaseKey(RegistryHive.LocalMachine, "").
-				            OpenSubKey(@"SOFTWARE\Microsoft\NET Framework Setup\NDP\")) {
+							OpenSubKey(@"SOFTWARE\Microsoft\NET Framework Setup\NDP\")) {
 				foreach (string versionKeyName in ndpKey.GetSubKeyNames()) {
 					if (!versionKeyName.StartsWith("v"))
 						continue;
@@ -496,7 +502,7 @@ namespace Confuser.Core {
 
 			using (RegistryKey ndpKey =
 				RegistryKey.OpenRemoteBaseKey(RegistryHive.LocalMachine, "").
-				            OpenSubKey(@"SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full\")) {
+							OpenSubKey(@"SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full\")) {
 				if (ndpKey.GetValue("Release") == null)
 					yield break;
 				var releaseKey = (int)ndpKey.GetValue("Release");
@@ -522,7 +528,7 @@ namespace Confuser.Core {
 
 			if (context.Resolver != null) {
 				context.Logger.Error("Cached assemblies:");
-				foreach (AssemblyDef asm in context.Resolver.GetCachedAssemblies()) {
+				foreach (AssemblyDef asm in context.InternalResolver.GetCachedAssemblies()) {
 					if (string.IsNullOrEmpty(asm.ManifestModule.Location))
 						context.Logger.ErrorFormat("    {0}", asm.FullName);
 					else

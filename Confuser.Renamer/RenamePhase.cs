@@ -1,28 +1,25 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using Confuser.Core;
 using dnlib.DotNet;
+using dnlib.DotNet.Pdb;
 
 namespace Confuser.Renamer {
-	internal class RenamePhase : ProtectionPhase {
+	class RenamePhase : ProtectionPhase {
 		public RenamePhase(NameProtection parent)
 			: base(parent) { }
 
-		public override ProtectionTargets Targets {
-			get { return ProtectionTargets.AllDefinitions; }
-		}
+		public override ProtectionTargets Targets => ProtectionTargets.AllDefinitions;
 
-		public override string Name {
-			get { return "Renaming"; }
-		}
+		public override string Name => "Renaming";
 
 		protected override void Execute(ConfuserContext context, ProtectionParameters parameters) {
 			var service = (NameService)context.Registry.GetService<INameService>();
 
 			context.Logger.Debug("Renaming...");
-			foreach (IRenamer renamer in service.Renamers) {
-				foreach (IDnlibDef def in parameters.Targets)
+			foreach (var renamer in service.Renamers) {
+				foreach (var def in parameters.Targets)
 					renamer.PreRename(context, service, parameters, def);
 				context.CheckCancellation();
 			}
@@ -30,21 +27,20 @@ namespace Confuser.Renamer {
 			var targets = parameters.Targets.ToList();
 			service.GetRandom().Shuffle(targets);
 			var pdbDocs = new HashSet<string>();
-			foreach (IDnlibDef def in targets.WithProgress(context.Logger)) {
-				if (def is ModuleDef && parameters.GetParameter(context, def, "rickroll", false))
-					RickRoller.CommenceRickroll(context, (ModuleDef)def);
+			foreach (var def in GetTargetsWithDelay(targets, context, service).WithProgress(targets.Count, context.Logger)) {
+				if (def is ModuleDef moduleDef && parameters.GetParameter(context, moduleDef, "rickroll", false))
+					RickRoller.CommenceRickroll(context, moduleDef);
 
 				bool canRename = service.CanRename(def);
-				RenameMode mode = service.GetRenameMode(def);
+				var mode = service.GetRenameMode(def);
 
-				if (def is MethodDef) {
-					var method = (MethodDef)def;
-					if ((canRename || method.IsConstructor) && parameters.GetParameter(context, def, "renameArgs", true)) {
-						foreach (ParamDef param in ((MethodDef)def).ParamDefs)
+				if (def is MethodDef method) {
+					if ((canRename || method.IsConstructor) && parameters.GetParameter(context, method, "renameArgs", true)) {
+						foreach (var param in method.ParamDefs)
 							param.Name = null;
 					}
 
-					if (parameters.GetParameter(context, def, "renPdb", false) && method.HasBody) {
+					if (parameters.GetParameter(context, method, "renPdb", false) && method.HasBody) {
 						foreach (var instr in method.Body.Instructions) {
 							if (instr.SequencePoint != null && !pdbDocs.Contains(instr.SequencePoint.Document.Url)) {
 								instr.SequencePoint.Document.Url = service.ObfuscateName(instr.SequencePoint.Document.Url, mode);
@@ -55,51 +51,94 @@ namespace Confuser.Renamer {
 							if (!string.IsNullOrEmpty(local.Name))
 								local.Name = service.ObfuscateName(local.Name, mode);
 						}
-						method.Body.Scope = null;
+
+						if (method.Body.HasPdbMethod)
+							method.Body.PdbMethod.Scope = new PdbScope();
 					}
 				}
 
 				if (!canRename)
 					continue;
 
-				IList<INameReference> references = service.GetReferences(def);
-				bool cancel = false;
-				foreach (INameReference refer in references) {
-					cancel |= refer.ShouldCancelRename();
-					if (cancel) break;
-				}
+				service.SetIsRenamed(def);
+
+				var references = service.GetReferences(def);
+				bool cancel = references.Any(r => r.ShouldCancelRename);
 				if (cancel)
 					continue;
 
-				if (def is TypeDef) {
-					var typeDef = (TypeDef)def;
-					if (parameters.GetParameter(context, def, "flatten", true)) {
-						typeDef.Name = service.ObfuscateName(typeDef.FullName, mode);
+				if (def is TypeDef typeDef) {
+					if (parameters.GetParameter(context, typeDef, "flatten", true)) {
 						typeDef.Namespace = "";
 					}
 					else {
-						typeDef.Namespace = service.ObfuscateName(typeDef.Namespace, mode);
-						typeDef.Name = service.ObfuscateName(typeDef.Name, mode);
+						var nsFormat = parameters.GetParameter(context, typeDef, "nsFormat", "{0}");
+						typeDef.Namespace = service.ObfuscateName(nsFormat, typeDef.Namespace, mode);
 					}
-					foreach (var param in typeDef.GenericParameters)
-						param.Name = ((char)(param.Number + 1)).ToString();
+					typeDef.Name = service.ObfuscateName(typeDef, mode);
+					RenameGenericParameters(typeDef.GenericParameters);
 				}
-				else if (def is MethodDef) {
-					foreach (var param in ((MethodDef)def).GenericParameters)
-						param.Name = ((char)(param.Number + 1)).ToString();
-
-					def.Name = service.ObfuscateName(def.Name, mode);
+				else if (def is MethodDef methodDef) {
+					methodDef.Name = service.ObfuscateName(methodDef, mode);
+					RenameGenericParameters(methodDef.GenericParameters);
 				}
 				else
-					def.Name = service.ObfuscateName(def.Name, mode);
+					def.Name = service.ObfuscateName(def, mode);
 
-				foreach (INameReference refer in references.ToList()) {
-					if (!refer.UpdateNameReference(context, service)) {
-						context.Logger.ErrorFormat("Failed to update name reference on '{0}'.", def);
-						throw new ConfuserException(null);
+				int updatedReferences = -1;
+				do {
+					var oldUpdatedCount = updatedReferences;
+					// This resolves the changed name references and counts how many were changed.
+					var updatedReferenceList = references.Where(refer => refer.UpdateNameReference(context, service)).ToArray();
+					updatedReferences = updatedReferenceList.Length;
+					if (updatedReferences == oldUpdatedCount) {
+						var errorBuilder = new StringBuilder();
+						errorBuilder.AppendLine("Infinite loop detected while resolving name references.");
+						errorBuilder.Append("Processed definition: ").AppendDescription(def, service).AppendLine();
+						errorBuilder.Append("Assembly: ").AppendLine(context.CurrentModule.FullName);
+						errorBuilder.AppendLine("Faulty References:");
+						foreach (var reference in updatedReferenceList) {
+							errorBuilder.Append(" - ").AppendLine(reference.ToString(service));
+						}
+						context.Logger.Error(errorBuilder.ToString().Trim());
+						throw new ConfuserException();
 					}
+					context.CheckCancellation();
+				} while (updatedReferences > 0);
+			}
+		}
+
+		static void RenameGenericParameters(IList<GenericParam> genericParams)
+		{
+			foreach (var param in genericParams)
+				param.Name = ((char) (param.Number + 1)).ToString();
+		}
+
+		static IEnumerable<IDnlibDef> GetTargetsWithDelay(IList<IDnlibDef> definitions, ConfuserContext context, INameService service) {
+			var delayedItems = new List<IDnlibDef>();
+			var currentList = definitions;
+			var lastCount = -1;
+			while (currentList.Any()) {
+				foreach (var def in currentList) {
+					if (service.GetReferences(def).Any(r => r.DelayRenaming(service)))
+						delayedItems.Add(def);
+					else
+						yield return def;
 				}
-				context.CheckCancellation();
+
+				if (delayedItems.Count == lastCount) {
+					var errorBuilder = new StringBuilder();
+					errorBuilder.AppendLine("Failed to rename all targeted members, because the references are blocking each other.");
+					errorBuilder.AppendLine("Remaining definitions: ");
+					foreach (var def in delayedItems) {
+						errorBuilder.Append("• ").AppendDescription(def, service).AppendLine();
+					}
+					context.Logger.Warn(errorBuilder.ToString().Trim());
+					yield break;
+				}
+				lastCount = delayedItems.Count;
+				currentList = delayedItems;
+				delayedItems = new List<IDnlibDef>();
 			}
 		}
 	}

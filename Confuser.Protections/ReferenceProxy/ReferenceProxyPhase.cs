@@ -119,6 +119,9 @@ namespace Confuser.Protections.ReferenceProxy {
 		}
 
 		void ProcessMethod(RPContext ctx) {
+			if (ctx.Marker.GetHelperParent(ctx.Method) != null)
+				return;
+
 			for (int i = 0; i < ctx.Body.Instructions.Count; i++) {
 				Instruction instr = ctx.Body.Instructions[i];
 				if (instr.OpCode.Code == Code.Call || instr.OpCode.Code == Code.Callvirt || instr.OpCode.Code == Code.Newobj) {
@@ -150,7 +153,7 @@ namespace Confuser.Protections.ReferenceProxy {
 						continue;
 					// No instance value type methods
 					if (declType.IsValueType && operand.MethodSig.HasThis)
-						return;
+						continue;
 					// No prefixed call
 					if (i - 1 >= 0 && ctx.Body.Instructions[i - 1].OpCode.OpCodeType == OpCodeType.Prefix)
 						continue;

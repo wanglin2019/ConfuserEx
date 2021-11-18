@@ -61,7 +61,7 @@ namespace Confuser.Protections.AntiTamper {
 				else if (instr.OpCode == OpCodes.Call) {
 					var method = (IMethod)instr.Operand;
 					if (method.DeclaringType.Name == "Mutation" &&
-					    method.Name == "Crypt") {
+						method.Name == "Crypt") {
 						Instruction ldDst = instrs[i - 2];
 						Instruction ldSrc = instrs[i - 1];
 						Debug.Assert(ldDst.OpCode == OpCodes.Ldloc && ldSrc.OpCode == OpCodes.Ldloc);
@@ -77,8 +77,8 @@ namespace Confuser.Protections.AntiTamper {
 				initMethod.Body.Instructions.Add(instr);
 
 			MutationHelper.InjectKeys(initMethod,
-			                          new[] { 0, 1, 2, 3, 4 },
-			                          new[] { (int)(name1 * name2), (int)z, (int)x, (int)c, (int)v });
+									  new[] { 0, 1, 2, 3, 4 },
+									  new[] { (int)(name1 * name2), (int)z, (int)x, (int)c, (int)v });
 
 			var name = context.Registry.GetService<INameService>();
 			var marker = context.Registry.GetService<IMarkerService>();
@@ -96,16 +96,18 @@ namespace Confuser.Protections.AntiTamper {
 
 		public void HandleMD(AntiTamperProtection parent, ConfuserContext context, ProtectionParameters parameters) {
 			methods = parameters.Targets.OfType<MethodDef>().ToList();
-			context.CurrentModuleWriterListener.OnWriterEvent += OnWriterEvent;
+			context.CurrentModuleWriterOptions.WriterEvent += WriterEvent;
 		}
 
-		void OnWriterEvent(object sender, ModuleWriterListenerEventArgs e) {
-			var writer = (ModuleWriterBase)sender;
-			if (e.WriterEvent == ModuleWriterEvent.MDEndCreateTables) {
-				CreateSections(writer);
-			}
-			else if (e.WriterEvent == ModuleWriterEvent.BeginStrongNameSign) {
-				EncryptSection(writer);
+		void WriterEvent(object sender, ModuleWriterEventArgs e) {
+			switch (e.Event)
+			{
+				case ModuleWriterEvent.MDEndCreateTables:
+					CreateSections(e.Writer);
+					break;
+				case ModuleWriterEvent.BeginStrongNameSign:
+					EncryptSection(e.Writer);
+					break;
 			}
 		}
 
@@ -124,8 +126,8 @@ namespace Confuser.Protections.AntiTamper {
 
 			uint alignment;
 
-			alignment = writer.TextSection.Remove(writer.MetaData).Value;
-			writer.TextSection.Add(writer.MetaData, alignment);
+			alignment = writer.TextSection.Remove(writer.Metadata).Value;
+			writer.TextSection.Add(writer.Metadata, alignment);
 
 			alignment = writer.TextSection.Remove(writer.NetResources).Value;
 			writer.TextSection.Add(writer.NetResources, alignment);
@@ -155,7 +157,7 @@ namespace Confuser.Protections.AntiTamper {
 				}
 			}
 			if (moved)
-				writer.Sections.Add(peSection);
+				writer.Sections.AddBeforeReloc(peSection);
 
 			// move encrypted methods
 			var encryptedChunk = new MethodBodyChunks(writer.TheOptions.ShareMethodBodies);
@@ -163,7 +165,7 @@ namespace Confuser.Protections.AntiTamper {
 			foreach (MethodDef method in methods) {
 				if (!method.HasBody)
 					continue;
-				MethodBody body = writer.MetaData.GetMethodBody(method);
+				MethodBody body = writer.Metadata.GetMethodBody(method);
 				bool ok = writer.MethodBodies.Remove(body);
 				encryptedChunk.Add(body);
 			}
@@ -187,7 +189,7 @@ namespace Confuser.Protections.AntiTamper {
 			uint encLoc = 0, encSize = 0;
 			int origSects = -1;
 			if (writer is NativeModuleWriter && writer.Module is ModuleDefMD)
-				origSects = ((ModuleDefMD)writer.Module).MetaData.PEImage.ImageSectionHeaders.Count;
+				origSects = ((ModuleDefMD)writer.Module).Metadata.PEImage.ImageSectionHeaders.Count;
 			for (int i = 0; i < sections; i++) {
 				uint nameHash;
 				if (origSects > 0) {

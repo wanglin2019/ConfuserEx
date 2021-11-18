@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using dnlib.DotNet.Writer;
 
 namespace Confuser.Core.Services {
 	/// <summary>
@@ -34,11 +36,7 @@ namespace Confuser.Core.Services {
 		/// <param name="seed">The seed data.</param>
 		/// <returns>The seed buffer.</returns>
 		internal static byte[] Seed(string seed) {
-			byte[] ret;
-			if (!string.IsNullOrEmpty(seed))
-				ret = Utils.SHA256(Encoding.UTF8.GetBytes(seed));
-			else
-				ret = Utils.SHA256(Guid.NewGuid().ToByteArray());
+			byte[] ret = Utils.SHA256(!string.IsNullOrEmpty(seed) ? Encoding.UTF8.GetBytes(seed) : Guid.NewGuid().ToByteArray());
 
 			for (int i = 0; i < 32; i++) {
 				ret[i] *= primes[i % primes.Length];
@@ -155,6 +153,13 @@ namespace Confuser.Core.Services {
 		}
 
 		/// <summary>
+		///     Returns a nonnegative random integer that is less than the specified maximum.
+		/// </summary>
+		/// <param name="max">The exclusive upper bound.</param>
+		/// <returns>Requested random number.</returns>
+		public uint NextUInt32(uint max) => NextUInt32() % max;
+
+		/// <summary>
 		///     Returns a random double floating pointer number from 0 (inclusive) to 1 (exclusive).
 		/// </summary>
 		/// <returns>Requested random number.</returns>
@@ -187,6 +192,26 @@ namespace Confuser.Core.Services {
 				list[i] = tmp;
 			}
 		}
+
+		/// <summary>
+		///     Shuffles the element in the specified metadata table.
+		/// </summary>
+		/// <typeparam name="T"></typeparam>
+		/// <param name="table">The metadata table to shuffle.</param>
+		public void Shuffle<T>(MDTable<T> table) where T : struct {
+			if (table.IsEmpty) return;
+
+			for (uint i = (uint)(table.Rows); i > 2; i--) {
+				uint k = NextUInt32(i - 1) + 1;
+				Debug.Assert(k >= 1, $"{nameof(k)} >= 1");
+				Debug.Assert(k < i, $"{nameof(k)} < {nameof(i)}");
+				Debug.Assert(k <= table.Rows, $"{nameof(k)} <= {nameof(table)}.Rows");
+
+				var tmp = table[k];
+				table[k] = table[i];
+				table[i] = tmp;
+			}
+		}
 	}
 
 	/// <summary>
@@ -195,12 +220,15 @@ namespace Confuser.Core.Services {
 	internal class RandomService : IRandomService {
 		readonly byte[] seed; //32 bytes
 
+		public string SeedString { get; }
+
 		/// <summary>
 		///     Initializes a new instance of the <see cref="RandomService" /> class.
 		/// </summary>
 		/// <param name="seed">The project seed.</param>
 		public RandomService(string seed) {
-			this.seed = RandomGenerator.Seed(seed);
+			SeedString = string.IsNullOrEmpty(seed) ? Guid.NewGuid().ToString() : seed;
+			this.seed = RandomGenerator.Seed(SeedString);
 		}
 
 		/// <inheritdoc />
@@ -226,5 +254,7 @@ namespace Confuser.Core.Services {
 		/// <returns>The requested RNG.</returns>
 		/// <exception cref="System.ArgumentNullException"><paramref name="id" /> is <c>null</c>.</exception>
 		RandomGenerator GetRandomGenerator(string id);
+
+		string SeedString { get; }
 	}
 }
