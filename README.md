@@ -1,4 +1,6 @@
 ConfuserEx
+sync from https://github.com/mkaring/ConfuserEx/
+
 ========
 ConfuserEx is a open-source protector for .NET applications.
 It is the successor of [Confuser](http://confuser.codeplex.com) project.
