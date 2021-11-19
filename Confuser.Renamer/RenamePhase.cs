@@ -102,6 +102,8 @@ namespace Confuser.Renamer {
 				{
 					context.Logger.Debug($"Rename UpdateNameReference,references count:{references.Count}");
 
+					bool firstDectedInfiniteLoop = false;
+
 					int updatedReferences = -1;
 					do {
 						var oldUpdatedCount = updatedReferences;
@@ -109,16 +111,22 @@ namespace Confuser.Renamer {
 						var updatedReferenceList = references.Where(refer => refer.UpdateNameReference(context, service)).ToArray();
 						updatedReferences = updatedReferenceList.Length;
 						if (updatedReferences == oldUpdatedCount) {
-							var errorBuilder = new StringBuilder();
-							errorBuilder.AppendLine("Infinite loop detected while resolving name references.");
-							errorBuilder.Append("Processed definition: ").AppendDescription(def, service).AppendLine();
-							errorBuilder.Append("Assembly: ").AppendLine(context.CurrentModule.FullName);
-							errorBuilder.AppendLine("Faulty References:");
-							foreach (var reference in updatedReferenceList) {
-								errorBuilder.Append(" - ").AppendLine(reference.ToString(service));
+							if (!firstDectedInfiniteLoop) {
+								firstDectedInfiniteLoop = true;
 							}
-							context.Logger.Error(errorBuilder.ToString().Trim());
-							throw new ConfuserException();
+							else {
+								var errorBuilder = new StringBuilder();
+								errorBuilder.AppendLine("Infinite loop detected while resolving name references.");
+								errorBuilder.Append("Processed definition: ").AppendDescription(def, service).AppendLine();
+								errorBuilder.Append("Assembly: ").AppendLine(context.CurrentModule.FullName);
+								errorBuilder.AppendLine("Faulty References:");
+								foreach (var reference in updatedReferenceList) {
+									errorBuilder.Append(" - ").AppendLine(reference.ToString(service));
+								}
+								context.Logger.Error(errorBuilder.ToString().Trim());
+								throw new ConfuserException();
+							}
+							
 						}
 						context.CheckCancellation();
 					} while (updatedReferences > 0);
