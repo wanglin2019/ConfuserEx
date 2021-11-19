@@ -18,7 +18,9 @@ namespace Confuser.Renamer.References {
 
 		public bool UpdateNameReference(ConfuserContext context, INameService service) {
 			if (string.Equals(rec.TypeFullName, sig.ReflectionFullName, StringComparison.Ordinal)) return false;
+			context.Logger.Debug($"BAMLTypeReference UpdateNameReference: {rec.TypeFullName}->{sig.ReflectionFullName}");
 			rec.TypeFullName = sig.ReflectionFullName;
+
 			return true;
 		}
 

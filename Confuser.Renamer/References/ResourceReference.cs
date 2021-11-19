@@ -23,6 +23,7 @@ namespace Confuser.Renamer.References {
 		public bool UpdateNameReference(ConfuserContext context, INameService service) {
 			var newName = string.Format(CultureInfo.InvariantCulture, format, typeDef.ReflectionFullName);
 			if (UTF8String.Equals(resource.Name, newName)) return false;
+			context.Logger.Debug($"ResourceReference UpdateNameReference: {resource.Name}->{newName}");
 			resource.Name = newName;
 			return true;
 		}

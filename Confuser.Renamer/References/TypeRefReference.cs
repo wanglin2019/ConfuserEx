@@ -21,6 +21,8 @@ namespace Confuser.Renamer.References {
 			if (UTF8String.Equals(typeRef.Namespace, typeDef.Namespace) && 
 				UTF8String.Equals(typeRef.Name, typeDef.Name)) return false;
 
+			context.Logger.Debug($"TypeRefReference UpdateNameReference, Namespace: {typeRef.Namespace}->{typeDef.Namespace}, Name: {typeRef.Name}->{typeDef.Name}");
+			
 			typeRef.Namespace = typeDef.Namespace;
 			typeRef.Name = typeDef.Name;
 			return true;

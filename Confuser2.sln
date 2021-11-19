@@ -139,6 +139,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "389_MixedCultureCasing.Test
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WpfRenamingLib", "Tests\WpfRenamingLib\WpfRenamingLib.csproj", "{856F21ED-9461-4A93-B696-82449CCE0ADE}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WpfRenamAttachedPropertyName", "Tests\WpfRenamAttachedPropertyName\WpfRenamAttachedPropertyName.csproj", "{B9EE5CA1-E295-4D79-B318-7CB428820C32}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -880,6 +882,18 @@ Global
 		{856F21ED-9461-4A93-B696-82449CCE0ADE}.Release|x64.Build.0 = Release|Any CPU
 		{856F21ED-9461-4A93-B696-82449CCE0ADE}.Release|x86.ActiveCfg = Release|Any CPU
 		{856F21ED-9461-4A93-B696-82449CCE0ADE}.Release|x86.Build.0 = Release|Any CPU
+		{B9EE5CA1-E295-4D79-B318-7CB428820C32}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B9EE5CA1-E295-4D79-B318-7CB428820C32}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B9EE5CA1-E295-4D79-B318-7CB428820C32}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{B9EE5CA1-E295-4D79-B318-7CB428820C32}.Debug|x64.Build.0 = Debug|Any CPU
+		{B9EE5CA1-E295-4D79-B318-7CB428820C32}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{B9EE5CA1-E295-4D79-B318-7CB428820C32}.Debug|x86.Build.0 = Debug|Any CPU
+		{B9EE5CA1-E295-4D79-B318-7CB428820C32}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B9EE5CA1-E295-4D79-B318-7CB428820C32}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B9EE5CA1-E295-4D79-B318-7CB428820C32}.Release|x64.ActiveCfg = Release|Any CPU
+		{B9EE5CA1-E295-4D79-B318-7CB428820C32}.Release|x64.Build.0 = Release|Any CPU
+		{B9EE5CA1-E295-4D79-B318-7CB428820C32}.Release|x86.ActiveCfg = Release|Any CPU
+		{B9EE5CA1-E295-4D79-B318-7CB428820C32}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -938,6 +952,7 @@ Global
 		{75E5F9A0-8D69-4426-9F16-4A65E941974D} = {356BDB31-853E-43BB-8F9A-D8AC08F69EBB}
 		{D1CCDA5D-E460-4ACC-B51A-730DE8F0ECF3} = {356BDB31-853E-43BB-8F9A-D8AC08F69EBB}
 		{856F21ED-9461-4A93-B696-82449CCE0ADE} = {356BDB31-853E-43BB-8F9A-D8AC08F69EBB}
+		{B9EE5CA1-E295-4D79-B318-7CB428820C32} = {356BDB31-853E-43BB-8F9A-D8AC08F69EBB}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {0D937D9E-E04B-4A68-B639-D4260473A388}

@@ -1,0 +1,52 @@
+<project outputDir="F:\repos\ConfuserEx\Tests\WpfRenamAttachedPropertyName\bin\Debug\Confused" baseDir="F:\repos\ConfuserEx\Tests\WpfRenamAttachedPropertyName\bin\Debug" xmlns="http://confuser.codeplex.com">
+  <module path="WpfRenamAttachedPropertyName.dll">
+    <rule pattern="true">
+      <protection id="anti debug" action="remove" />
+      <protection id="anti dump" action="remove" />
+      <protection id="anti ildasm" action="remove" />
+      <protection id="anti tamper" action="remove" />
+      <protection id="constants" action="remove" />
+      <protection id="ctrl flow" action="remove" />
+      <protection id="invalid metadata" action="remove" />
+      <protection id="ref proxy" action="remove" />
+      <protection id="watermark" action="remove" />
+      <protection id="resources" action="remove" />
+      <protection id="rename">
+        <argument name="mode" value="sequential" />
+        <argument name="password" value="This password is secret" />
+        <argument name="renameArgs" value="true" />
+        <argument name="renEnum" value="true" />
+        <argument name="flatten" value="true" />
+        <argument name="forceRen" value="false" />
+        <argument name="renPublic" value="true" />
+        <argument name="renPdb" value="true" />
+        <argument name="renXaml" value="true" />
+      </protection>
+    </rule>
+  </module>
+  <module path="WpfRenamingLib.dll" >
+    <rule pattern="true">
+      <protection id="anti debug" action="remove" />
+      <protection id="anti dump" action="remove" />
+      <protection id="anti ildasm" action="remove" />
+      <protection id="anti tamper" action="remove" />
+      <protection id="constants" action="remove" />
+      <protection id="ctrl flow" action="remove" />
+      <protection id="invalid metadata" action="remove" />
+      <protection id="ref proxy" action="remove" />
+      <protection id="watermark" action="remove" />
+      <protection id="resources" action="remove" />
+      <protection id="rename">
+        <argument name="mode" value="sequential" />
+        <argument name="password" value="This password is secret" />
+        <argument name="renameArgs" value="true" />
+        <argument name="renEnum" value="true" />
+        <argument name="flatten" value="true" />
+        <argument name="forceRen" value="false" />
+        <argument name="renPublic" value="true" />
+        <argument name="renPdb" value="true" />
+        <argument name="renXaml" value="true" />
+      </protection>
+    </rule>
+  </module>
+</project>
